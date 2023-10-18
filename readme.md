@@ -1,11 +1,11 @@
 
 <!-- TODO: - Upload N6000 and wild muppet - Upload Weights -->
+
+# 3D-MuPPET: 3D Multi-Pigeon Pose Estimation and Tracking
 ## News:
 - **18/10/2023:** Officially launched git repository. Please hang on for the datasets (will be uploaded in the coming 2 weeks!)
 
-# 3D-MuPPET: 3D Multi-Pigeon Pose Estimation and Tracking
 ## Description
-
 This repository contains the code for the preprint: ["3D-MuPPET: 3D Multi-Pigeon Pose
 Estimation and Tracking"](https://arxiv.org/abs/2308.15316). For more details and qualitative results,
 please visit our [project page](https://alexhang212.github.io/3D-MuPPET/). We offer code and scripts for: 1)
