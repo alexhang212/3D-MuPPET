@@ -1,0 +1,7 @@
+path: ./TrainingData/N6000/YOLO
+train: ./TrainingData/N6000/YOLO/train
+val: ./TrainingData/N6000/YOLO/valid
+ 
+# class names
+names: 
+  0: 'bird'

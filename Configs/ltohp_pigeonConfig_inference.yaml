@@ -1,0 +1,74 @@
+title: "ltohp_pigeon"
+kind: "3DPOP"
+vis_freq: 5
+vis_n_elements: 10
+
+image_shape: [384, 384]
+
+opt:
+  criterion: "MAE"
+
+  use_volumetric_ce_loss: true
+  volumetric_ce_loss_weight: 0.01
+
+  # n_objects_per_epoch: 15000
+  n_objects_per_epoch: 100
+  n_epochs: 100
+
+  batch_size: 1
+  val_batch_size: 10
+
+  lr: 0.0001
+  process_features_lr: 0.001
+  volume_net_lr: 0.001
+
+  scale_keypoints_3d: 0.1
+
+model:
+  name: "vol"
+  kind: "3DPOP"
+  volume_aggregation_method: "softmax"
+
+  init_weights: true
+  checkpoint: "./Weights/ltohp_weight.pth"
+  # checkpoint:
+  use_gt_pelvis: true
+
+  cuboid_side: 350.0
+
+  volume_size: 64
+  volume_multiplier: 1.0
+  volume_softmax: true
+
+  heatmap_softmax: true
+  heatmap_multiplier: 100.0
+
+  backbone:
+    name: "resnet152"
+    style: "simple"
+
+    init_weights: false
+    checkpoint:
+    num_joints: 9
+    num_layers: 152
+
+dataset:
+  kind: "3DPOP"
+
+  train:
+    root: 
+    labels_path: 
+
+    pred_results_path: null
+
+    with_damaged_actions: true
+    undistort_images: false
+
+    scale_bbox: 1.0
+
+    shuffle: true
+    randomize_n_views: false
+    min_n_views: null
+    max_n_views: null
+    num_workers: 10
+

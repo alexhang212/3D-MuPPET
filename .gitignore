@@ -138,3 +138,7 @@ runs/
 backupscripts/
 *.jpg
 *.p
+Weights/
+gh-pages/
+TrainingData/*
+

@@ -1,0 +1,30 @@
+species: 'pigeon'
+print_freq: 10
+
+dataset:
+    training_session: 'muppet_3dpop_local'
+    pretrained_model:
+    pretrained_model: 
+    training_data_path: "./TrainingData/N6000"
+
+data_augmentation:
+    flip_probability: 0.5
+    scale_percentages_range:
+    brightness: 0.6
+    contrast: 0
+    saturation: 0
+    hue: 0
+    sharpness_factor: 0
+    sharpness_prob: 0.2
+    gray_scale: 0
+    
+hyperparameters:
+    batch_size_train: 1
+    learning_rate: 0.005
+    momentum: 0.9
+    weight_decay: 0.0005
+    step_size: 100
+    gamma: 0.5
+    num_epochs: 100
+    
+num_workers: 0
