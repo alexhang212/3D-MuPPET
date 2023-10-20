@@ -3,7 +3,7 @@
 
 # 3D-MuPPET: 3D Multi-Pigeon Pose Estimation and Tracking
 ## News:
-- **18/10/2023:** Officially launched git repository. Please hang on for the datasets (will be uploaded in the coming 2 weeks!)
+- **18/10/2023:** Officially launched git repository. Please hang on for the datasets and weights (will be uploaded in the coming 2 weeks, sorry!!!)
 
 ## Description
 This repository contains the code for the preprint: ["3D-MuPPET: 3D Multi-Pigeon Pose
@@ -90,8 +90,7 @@ refer to the [training documentation](./Training/readme.md).
 
 Scripts for tracking and evaluation on the test videos of the 3D POP
 dataset are available. The scripts perform inference using the DLC\*
-pipeline and then format the output to meet the benchmarking requirements of
-[XX](link).
+pipeline and then format the output to do benchmarking [here](https://github.com/JonathonLuiten/TrackEval/blob/master/docs/MOTChallenge-Official/Readme.md).
 
 ```bash
 ##Run evaluation:
