@@ -181,15 +181,18 @@
                         <h4>
                             <b>3D Pose Estimation and Tracking of Multiple Pigeons in Captive Environments</b>
                         </h4>
-                        <p>Using the 3D-POP dataset, we trained 2D keypoint detection models, then triangulated postures into 3D. We also show that models trained on single pigeon data also works well with multi-pigeon data.</p>
+                        <p>Using the 3D-POP dataset, we trained 2D keypoint detection models, then triangulated postures into 3D. We also show that models trained on single pigeon data also work well with multi-pigeon data.</p>
                         <br>
+                        <p>This video shows 3D keypoints from triangulation, reprojected to a single camera view.</p>
                         <video id="v0" width="100%" autoplay loop muted controls>
                             <source src="videos/BarnSample.mp4" type="video/mp4" />
                         </video>
+                        <br><br>
+                        <p>This video shows 3D pose estimations of 10 foraging pigeons.</p>
                         <video id="v0" width="100%" autoplay loop muted controls>
                             <source src="videos/black.mp4" type="video/mp4" />
                         </video>
-                        <p><br><br><b>Pigeon in outdoor environments.</b> using the segment anything model, we trained a 2D keypoint detector with masked pigeon from captive data, then applied the model to pigeon videos outdoors for 3D tracking in the wild.</p>
+                        <p><br><br><b>Pigeons in outdoor environments.</b> Using the segment anything model, we trained a 2D keypoint detector with masked pigeons from captive data, then applied the model to pigeon videos outdoors for 3D tracking in the wild.</p>
                         <video id="v0" width="100%" autoplay loop muted controls>
                             <source src="videos/wild.mp4" type="video/mp4" />
                         </video>
@@ -214,13 +217,12 @@
                     <div class="col-md-12">
                         <pre style="background-color: #e9eeef">
                             <code>
-                                @article{waldmann20233d,
-                                    title={3D-MuPPET: 3D Multi-Pigeon Pose Estimation and Tracking},
-                                    author={Waldmann, Urs and Chan, Alex Hoi Hang and Naik, Hemal and Nagy, M{\'a}t{\'e} and Couzin, Iain D and Deussen, Oliver and Goldluecke, Bastian and Kano, Fumihiro},
-                                    journal={arXiv preprint arXiv:2308.15316},
-                                    year={2023}
-                                  }
-                                  
+    @article{waldmann20233d,
+      title={3D-MuPPET: 3D Multi-Pigeon Pose Estimation and Tracking},
+      author={Waldmann, Urs and Chan, Alex Hoi Hang and Naik, Hemal and Nagy, M{\'a}t{\'e} and Couzin, Iain D and Deussen, Oliver and Goldluecke, Bastian and Kano, Fumihiro},
+      journal={arXiv preprint arXiv:2308.15316},
+      year={2023}
+    }  
                             </code>
                         </pre>
                     </div>
@@ -229,7 +231,7 @@
         </section>
         <!-- footer -->
         <footer class="text-center" style="margin-bottom:10px">
-            <a href="https://urs-waldmann.github.io/i-muppet/" target="_blank">3D-MuPPET</a> is maintained by <a href="https://alexhhchan.odoo.com/" target="_blank">Alex Chan</a>.
+            <a href="https://alexhang212.github.io/3D-MuPPET/" target="_blank">3D-MuPPET</a> is maintained by <a href="https://alexhhchan.odoo.com/" target="_blank">Alex Chan</a> and <a href="https://urs-waldmann.de/computer-vision/" target="_blank">Urs Waldmann</a>.
         </footer>
     </body>
 </html>
