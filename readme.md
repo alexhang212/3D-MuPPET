@@ -72,7 +72,8 @@ python Inference/YOLODLC_3DInference.py --dataset [3dpop_path] --seq [3dpop_sequ
 python Inference/ltohp_inference.py --dataset [3dpop_path] --seq [3dpop_sequence] --config [ltohp_config]
 ```
 
-4.  **Pigeons in the Wild**: \> Note: This also requires a separate
+4.  **Pigeons in the Wild**:
+> Note: This also requires a separate
     conda environment, which can be set up using
     `conda create -f Conda/WildPigeon.yaml`.
 
@@ -83,7 +84,7 @@ python Inference/PigeonWild_2DInference.py --input [input_video] --DLCweight [pa
 ## Training
 
 Scripts for training are provided. For detailed instructions, please
-refer to the [training documentation](./Training/Training.md).
+refer to the [training documentation](./Training/readme.md).
 
 ## Tracking Evaluation
 
@@ -107,8 +108,9 @@ For any questions regarding the code, please contact Alex Chan: hoi-hang.chan [a
 ## Cite Us
 ```
 @article{waldmann20233d,
-title={3D-MuPPET: 3D Multi-Pigeon Pose Estimation and Tracking},
- author={Waldmann, Urs and Chan, Alex Hoi Hang and Naik, Hemal and Nagy, M{\'a}t{\'e} and Couzin, Iain D and Deussen, Oliver and Goldluecke, Bastian and Kano, Fumihiro},
-journal={arXiv preprint arXiv:2308.15316},
-                year={2023}}                           
+    title={3D-MuPPET: 3D Multi-Pigeon Pose Estimation and Tracking},
+    author={Waldmann, Urs and Chan, Alex Hoi Hang and Naik, Hemal and Nagy, M{\'a}t{\'e} and Couzin, Iain D and Deussen, Oliver and Goldluecke, Bastian and Kano, Fumihiro},
+    journal={arXiv preprint arXiv:2308.15316},
+    year={2023}
+}                           
 ```
