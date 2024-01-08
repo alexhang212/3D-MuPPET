@@ -129,6 +129,7 @@ dmypy.json
 .pyre/
 
 ###Custom
+*.zip
 .vscode/
 *.pt
 Repositories/

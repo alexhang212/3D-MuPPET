@@ -1,0 +1,85 @@
+title: "ltohp_pigeon"
+kind: "3DPOP"
+vis_freq: 5
+vis_n_elements: 10
+
+image_shape: [384, 384]
+
+opt:
+  criterion: "MSESmooth"
+  mse_smooth_threshold: 400
+
+  # n_objects_per_epoch: 15000
+  n_objects_per_epoch: 100
+  n_epochs: 100
+
+  batch_size: 1
+  val_batch_size: 10
+
+  lr: 0.0001
+  process_features_lr: 0.001
+  volume_net_lr: 0.001
+
+  scale_keypoints_3d: 0.1
+
+model:
+  name: "alg"
+
+  init_weights: true
+  checkpoint: "/media/alexchan/Extreme SSD/WorkDir/Pigeon3DTrack/Weights/ltohp_Weights/N6000Alg/Lowest_E0292/weights.pth"
+  # checkpoint:
+  use_confidences: true
+  heatmap_multiplier: 100.0
+  heatmap_softmax: true
+
+
+  backbone:
+    name: "resnet152"
+    style: "simple"
+
+    init_weights: false
+    # checkpoint: "/home/alexchan/Documents/Pigeon3DTrack/Data/ltohp_Weights/pose_resnet_4.5_pixels_human36m.pth"
+    checkpoint:
+    num_joints: 9
+    num_layers: 152
+
+dataset:
+  kind: "3DPOP"
+
+  train:
+    root: "/home/alexchan/Documents/SampleDatasets/ImageTrainingData/N6000/"
+    labels_path: "/home/alexchan/Documents/SampleDatasets/ImageTrainingData/N6000/Annotation/Test-3D-Individual.json"
+    # labels_path: "/home/alexchan/Documents/SampleDatasets/ImageTrainingData/N100/Annotation/Test-3D-Individual.json"
+
+    pred_results_path: null
+    # pred_results_path: "/home/alexchan/Documents/SampleDatasets/ImageTrainingData/N5000/Results.p"
+
+    with_damaged_actions: true
+    undistort_images: false
+
+    scale_bbox: 1.0
+
+    shuffle: true
+    randomize_n_views: false
+    min_n_views: null
+    max_n_views: null
+    num_workers: 10
+
+  val:
+    h36m_root: "./data/human36m/processed/"
+    labels_path: "./data/human36m/extra/human36m-multiview-labels-GTbboxes.npy"
+    pred_results_path: null
+    # pred_results_path: "./data/pretrained/human36m/human36m_alg_10-04-2019/checkpoints/0060/results/val.pkl"
+
+    with_damaged_actions: true
+    undistort_images: true
+
+    scale_bbox: 1.0
+
+    shuffle: false
+    randomize_n_views: false
+    min_n_views: null
+    max_n_views: 4
+    num_workers: 10
+
+    retain_every_n_frames_in_test: 1

@@ -1,84 +1,272 @@
-""" inference on single video for YOLO + DLC"""
-import cv2 
-from ultralytics import YOLO
+""" inference on 3dpop seqeuence for YOLO + DLC"""
 import torch
-from tqdm import tqdm
+import cv2
 import numpy as np
+import math
+
 import argparse
+import sys
 
 import sys
+sys.path.append("./")
+sys.path.append("Utils")
+import VisualizeUtil
+
+import Network_utils
+from BundleAdjustmentTool import BundleAdjustmentTool_Triangulation, BundleAdjustmentTool_Triangulation_Filter
+from tqdm import tqdm
+
+import itertools
+import HungarianAlgorithm
+
+from scipy.spatial import distance_matrix
+from ultralytics import YOLO
+
+sys.path.append("Repositories/sort/")
+from sort import *
+
+sys.path.append("Repositories/DeepLabCut/")
 sys.path.append("Repositories/DeepLabCut-live")
 
 
 sys.path.append("Repositories/Dataset-3DPOP")
 from POP3D_Reader import Trial
 
-sys.path.append("Utils")
-from BundleAdjustmentTool import BundleAdjustmentTool_Triangulation
-import VisualizeUtil
-
 import math
 import os
 import deeplabcut as dlc
 from dlclive import DLCLive, Processor
-
-PIGEON_KEYPOINT_NAMES = ['bp_leftShoulder', 'bp_rightShoulder', 'bp_topKeel', 'bp_bottomKeel', 'bp_tail','hd_beak', 'hd_leftEye', 'hd_rightEye', 'hd_nose']
-
+PIGEON_KEYPOINT_NAMES = ['bp_leftShoulder', 'bp_rightShoulder', 'bp_topKeel', 'bp_bottomKeel', 'bp_tail','hd_beak', 'hd_nose','hd_leftEye', 'hd_rightEye']
 
 
-   
-def Process_Crop(Crop, CropSize):
-    """Crop image and pad, if too big, will scale down """
-    # import ipdb;ipdb.set_trace()
-    if Crop.shape[0] > CropSize[0] or Crop.shape[1] > CropSize[1]: #Crop is bigger, scale down
-        ScaleProportion = min(CropSize[0]/Crop.shape[0],CropSize[1]/Crop.shape[1])
-        
-        width_scaled = int(Crop.shape[1] * ScaleProportion)
-        height_scaled = int(Crop.shape[0] * ScaleProportion)
-        Crop = cv2.resize(Crop, (width_scaled,height_scaled), interpolation=cv2.INTER_LINEAR)  # resize image
-
-        # Points2D = {k:[v[0]*ScaleProportion,v[1]*ScaleProportion] for k,v in Points2D.items()}
-    else:
-        ScaleProportion = 1
-        
-    if Crop.shape[0] %2 ==0:
-        #Shape is even number
-        YPadTop = int((CropSize[1] - Crop.shape[0])/2)
-        YPadBot = int((CropSize[1] - Crop.shape[0])/2)
-    else:
-        YPadTop = int( ((CropSize[1] - Crop.shape[0])/2)-0.5)
-        YPadBot = int(((CropSize[1] - Crop.shape[0])/2)+0.5)
-    ##Padding:
-    if Crop.shape[1] %2 ==0:
-        #Shape is even number
-        XPadLeft = int((CropSize[0] - Crop.shape[1])/2)
-        XPadRight= int((CropSize[0] - Crop.shape[1])/2)
-    else:
-        XPadLeft =  int(((CropSize[0] - Crop.shape[1])/2)-0.5)
-        XPadRight= int(((CropSize[0] - Crop.shape[1])/2)+0.5)
-
-
-
-    OutImage = cv2.copyMakeBorder(Crop, YPadTop,YPadBot,XPadLeft,XPadRight,cv2.BORDER_CONSTANT,value=[0,0,0])
+def GetEucDist(Point1,Point2):
+    """Get euclidian error, both 2D and 3D"""
     
-    return OutImage,ScaleProportion, YPadTop,XPadLeft
+    if len(Point1) ==3 & len(Point2) ==3:
+        EucDist =math.sqrt(((Point1[0] - Point2[0]) ** 2) + ((Point1[1] - Point2[1]) ** 2) + ((Point1[2] - Point2[2]) ** 2) )
+    elif len(Point1) ==2 & len(Point2) ==2:
+        EucDist =math.sqrt(((Point1[0] - Point2[0]) ** 2) + ((Point1[1] - Point2[1]) ** 2))
+    else:
+        import ipdb;ipdb.set_trace()
+        Exception("point input size error")
+    
+    return EucDist
+
+def LoadNetwork(WeightsPath,device):
+
+    network = Network_utils.load_network(network_name='KeypointRCNN', 
+                           looking_for_object='pigeon', 
+                           eval_mode=True, pre_trained_model=WeightsPath,
+                            device=device)
+    
+    return network
+
+def ProcessImage(frame,device):
+    frame = Network_utils.image_cv_to_rgb_tensor(frame)
+
+    frame = Network_utils.normalize_tensor_image(
+        tensor_image=frame,
+        mean=(0.5, 0.5, 0.5),
+        std=(0.5, 0.5, 0.5)
+    )
+    frame = Network_utils.image_to_device(image=frame, device=device)
+    
+    return frame
+
+def GetBBoxOverlap(BBox1,BBox2):
+    """
+    Calculate bounding box overlap between 2 boxes, inputted as list, as [x1,x2,y1,y2]
+    
+    Outputs percentage overlap
+    """
+    dx = min(BBox1[2], BBox2[2]) - max(BBox1[0], BBox2[0])
+    dy = min(BBox1[3], BBox2[3]) - max(BBox1[1], BBox2[1])
+    if (dx>=0) and (dy>=0):
+        #Area of ind 1:
+        Area1 = (BBox1[2]-BBox1[0])*(BBox1[3]-BBox1[1])
+        if Area1 == 0:
+            return 0
+        return (dx*dy)/Area1
+    else:
+        return 0
+    
+def IsPointValid(Dim, point):
+    """Check if a point is valid, i.e within image frame"""
+    #get dimension of screen from config
+    Valid = False
+    if 0 <= point[0] <= Dim[0] and 0 <= point[1] <= Dim[1]:
+        Valid = True
+    else:
+        return Valid
+    return Valid
 
 
+def MatchID_BBox(GT_BBox,result,confidence_threshold=0.5,i=None):
+    """Given ground truth bbox and model predictions, assign ID to prediction based on BBox overlap"""
 
-def DLCInference(InferFrame,box,dlc_liveObj,CropSize):
-    """Inference for DLC"""
-    box = [0 if val < 0 else val for val in box] #f out of screen, 0
+    
+    Pred_BBoxList = result["boxes"].to('cpu').numpy().tolist()
+    
+    IndexBelowThreshold = np.where(result["scores"].to("cpu").numpy() < confidence_threshold)[0].tolist()
+    
+    # GT_BBoxList = [val for val in GT_BBox.values()]
+
+    OutDict = {}
+    AssingedIndex = []
+    
+
+    #Just match all ground truth to all
+    for key,val in GT_BBox.items() :
+        FoundMatch = False
+        PercentOverlapList  = [GetBBoxOverlap(Pred_BBox,val) for Pred_BBox in Pred_BBoxList]
+        # import ipdb;ipdb.set_trace()
+        if len(PercentOverlapList) ==0 or sum(PercentOverlapList) == 0: #no bbox predicted or no overlap
+            continue
+
+        while FoundMatch == False:            
+            MaxIndex = np.argmax(PercentOverlapList)
+            if MaxIndex in IndexBelowThreshold or MaxIndex in AssingedIndex:
+                if sum(PercentOverlapList) == 0: ##all possible match changed to 0, no match
+                    break
+                PercentOverlapList[MaxIndex] = 0
+                # print(i) #debugging purposes
+                
+                continue
+                #continue looping if the bbox has low score or is already assinged.
+            else:
+                OutDict.update({key:MaxIndex})
+                AssingedIndex.append(MaxIndex)
+                FoundMatch = True
+    
+    return OutDict
 
 
-    Crop = InferFrame[round(box[1]):round(box[3]),round(box[0]):round(box[2])]
+def MatchingAlgorithm(MatchingDict,CamNames,CamParamDict,DminThresh = 200):
+    """
+    Matching algorithm to get correspondeces based on reprojection
+    Dmin: based on Huang et al 2020, minimum threshold, after that finish matching
+    """
+    # import ipdb;ipdb.set_trace()
+
+    ##Get all combinations of cameras
+    CamNamePairs = list(itertools.combinations(CamNames,2))
+    # CamIndexPairs = [(CamNames.index(a), CamNames.index(b)) for a,b in CamNamePairs]
+    CamPairDict = {}
+    
+    #For each possible camera pair and for each possible detection pair, triangulate and reproject
+    ## to get reprojection error. Hungarian algorithm for each pair to then get pairs with min cost (error)
+
+    for CamPair in CamNamePairs:#For each possible camera pair
+        Cam1KP = MatchingDict[CamPair[0]]["Keypoints"]
+        Cam2KP = MatchingDict[CamPair[1]]["Keypoints"]
+
+        #if not same length just skip this for now
+        if len(Cam1KP) != len(Cam2KP):
+            continue
+
+        TempCamNames = [CamPair[0],CamPair[1]]
+
+        ObjectPairs = list(itertools.product(range(len(Cam1KP)),range(len(Cam2KP))))
+        ErrorArray = np.full((len(Cam1KP),len(Cam2KP)),0, dtype=np.float32) #left(rows) is KP1, top(columns) is KP2
+
+        Point3DDict = {}
+        for IndexPair in ObjectPairs:
+            #Prepare data:
+            Cam1Dict = {"%s"%(PIGEON_KEYPOINT_NAMES[j]):[Cam1KP[IndexPair[0]][j,0],Cam1KP[IndexPair[0]][j,1]] for j in range(Cam1KP[IndexPair[0]].shape[0])}
+            Cam2Dict = {"%s"%(PIGEON_KEYPOINT_NAMES[j]):[Cam2KP[IndexPair[1]][j,0],Cam2KP[IndexPair[1]][j,1]] for j in range(Cam2KP[IndexPair[1]].shape[0])}
+
+            Point2DDict = {TempCamNames[0]:Cam1Dict, TempCamNames[1]:Cam2Dict}
+
+            TriangTool = BundleAdjustmentTool_Triangulation(TempCamNames,CamParamDict)
+            TriangTool.PrepareInputData(Point2DDict)
+            All3DPoints = TriangTool.Points3DArr[TriangTool.PointIndexArr]
+            Reproject2D = TriangTool.Reproject(All3DPoints)
+            Point3DDict.update({IndexPair:TriangTool.Points3DArr})
+
+            ErrorList = [GetEucDist(TriangTool.Points2DArr[x],Reproject2D[x]) for x in range(TriangTool.Points2DArr.shape[0])]
+            ErrorArray[IndexPair[0],IndexPair[1]] = np.array(ErrorList).mean()
 
 
-    if dlc_liveObj.sess == None: #if first time, init
-        DLCPredict2D = dlc_liveObj.init_inference(Crop)
+        #Feed Error array into hungarian algorithm to find best match
+        FinalMatches = HungarianAlgorithm.hungarian_algorithm(ErrorArray)
+        FinalMatch3DPoints = [Point3DDict[IndexPair] for IndexPair in FinalMatches]
+        CamPairDict.update({CamPair:{"Matches":FinalMatches,"3DPoints":FinalMatch3DPoints }})
 
-    DLCPredict2D= dlc_liveObj.get_pose(Crop)
 
-    return DLCPredict2D
+    if len (CamPairDict) == 0:
+        return {}
+    ### Implementing Huang et al 2020 for dynamic matching
+    ### First get matrix of differences between all 3d point pairs (with corresponding camera and index pairs)
+    ### Find the min in that matrix, then start a global matched set
+    ### if any set already has any camera/index pair, just add to the set, if not start a new set
+    ### if a camera already exist in a set (with different index), use the existing one and throw this out
+
+    PointsList = []
+    IndexList = []
+    for camPair, val in CamPairDict.items():
+        for x in range(len(val["Matches"])):
+            PointsList.append(val["3DPoints"][x][3].tolist()) #bot keel instead of beak
+            IndexList.append([(camPair[0],val["Matches"][x][0]),(camPair[1],val["Matches"][x][1])])
+    
+    
+    #Pairwise distances of all points
+    PairDistances = distance_matrix(PointsList,PointsList)
+
+    np.fill_diagonal(PairDistances, np.inf)
+    Dmin = 0
+    GlobalMatchedList = []
+
+    while Dmin < DminThresh:
+        # print("yo")
+        MinIndex = np.unravel_index(PairDistances.argmin(),PairDistances.shape )
+        Dmin = PairDistances[MinIndex[0],MinIndex[1]]
+        PointCamPairs = set(IndexList[MinIndex[0]]+ IndexList[MinIndex[1]])
+
+        existSetIndex = set([x for x,Subset in enumerate(GlobalMatchedList) for pair in Subset if pair in PointCamPairs ])
+        #indexes in global list where there is overlap cam index pair
+
+        if len(existSetIndex)==0: ##no set already matched, create new set
+            GlobalMatchedList.append(PointCamPairs)
+        else: 
+            if len(existSetIndex)>1:
+                PairDistances[MinIndex[0],MinIndex[1]] = np.inf #remove the already matched pair
+                continue
+
+            MatchedSet = GlobalMatchedList[list(existSetIndex)[0]]
+            PresentCamNames = [pair[0] for pair in PointCamPairs]
+            for pair in MatchedSet:
+                if pair[0] in PresentCamNames: ##cam already matched here
+                    ##to find which one of the pairs shares cam name:
+                    MatchedPair = [subPair for subPair in PointCamPairs if subPair[0] == pair[0]]
+                    [PointCamPairs.discard(subPair) for subPair in MatchedPair]
+
+            GlobalMatchedList[list(existSetIndex)[0]].update(PointCamPairs)
+                    
+        PairDistances[MinIndex[0],MinIndex[1]] = np.inf #remove the already matched pair
+
+    # import ipdb;ipdb.set_trace()
+
+
+    ##Convert Global Matching list back to dictionary format, with an arbitiary index for each individual
+
+    FinalCamDict = {key:{} for key in CamNames}
+
+    # import ipdb;ipdb.set_trace()
+    #Go through each cluster
+    for x in range(len(GlobalMatchedList)): 
+        for cam in CamNames:
+            IndexList = [pair[1] for pair in GlobalMatchedList[x] if pair[0] == cam]
+            if len(IndexList) == 0:
+                CamIndex = None
+            else:
+                CamIndex = IndexList[0]
+
+            FinalCamDict[cam].update({x:CamIndex})
+    # import ipdb;ipdb.set_trace()
+    # FinalCamDict["Cam4"].values()
+    return FinalCamDict
+
+
 
 def getColor(keyPoint):
     if keyPoint.endswith("beak"):
@@ -105,19 +293,24 @@ def getColor(keyPoint):
 
 def VizualizeAll(frame, counter,VisCam,Boxes,Point3DDict,imsize,SubjectList, Lines = True):
     """Visualize all on visualize cam"""
+    ###Viszualize all
+    ##Reproject points
+    # Points3DArr = np.array(list(Point3DDict.values()))
+    # PointsNames = list(Point3DDict.keys())
+    # Allimgpts, jac = cv2.projectPoints(Points3DArr, VisCam.rvec, VisCam.tvec, VisCam.camMat, VisCam.distCoef)
 
     # import ipdb;ipdb.set_trace()
     for Subject in SubjectList:
         PointsDict = {}
-
+        
         SubjectDict = {k:v for k,v in Point3DDict.items() if k.startswith(Subject)}
-        if len(SubjectDict) == 0:
-            continue
-
         Points3DArr = np.array(list(SubjectDict.values()))
         PointsNames = list(SubjectDict.keys())
-        Allimgpts, jac = cv2.projectPoints(Points3DArr, VisCam.rvec, VisCam.tvec, VisCam.camMat, VisCam.distCoef)
-
+        # import ipdb;ipdb.set_trace()
+        try:
+            Allimgpts, jac = cv2.projectPoints(Points3DArr, VisCam.rvec, VisCam.tvec, VisCam.camMat, VisCam.distCoef)
+        except:
+            continue
 
         for i in range(len(Allimgpts)):
             pts = Allimgpts[i]
@@ -151,82 +344,80 @@ def VizualizeAll(frame, counter,VisCam,Boxes,Point3DDict,imsize,SubjectList, Lin
         # import ipdb;ipdb.set_trace()
         cv2.rectangle(frame,(round(box[0]),round(box[1])),(round(box[2]),round(box[3])),[255,0,0],3)
       
+
+    ###Visualize Tracks
+    Points3DKeel = {key.split("_")[0]: val for key,val in Point3DDict.items() if "bp_bottomKeel" in key}
+
+    IDs3D = list(Points3DKeel.keys())
+    points3D = np.array(list(Points3DKeel.values()))
+    Allimgpts, jac = cv2.projectPoints(points3D, VisCam.rvec, VisCam.tvec, VisCam.camMat, VisCam.distCoef)
+
+
+    for j in range(Allimgpts.shape[0]):
+        # import ipdb;ipdb.set_trace()
+        
+        Point = (round(Allimgpts[j][0][0])-30,round(Allimgpts[j][0][1])-70)
+        if not IsPointValid(imsize, Point):
+            continue
+        ##Plot rectangle around text
+        x,y = Point
+        text = "ID: %s"%str(int(IDs3D[j]))
+        font = cv2.FONT_HERSHEY_COMPLEX_SMALL
+        text_size, _ = cv2.getTextSize(text, font, 1, 1)
+        text_w, text_h = text_size
+        cv2.rectangle(frame, Point, (x + text_w, y + text_h), [255,255,255], -1)
+
+        frame = cv2.putText(frame,text,(x,y+text_h), font, 1, [255,0,0],1, cv2.LINE_AA)
+
     return frame
     
 
-def GetBBoxOverlap(BBox1,BBox2):
-    """
-    Calculate bounding box overlap between 2 boxes, inputted as list, as [x1,x2,y1,y2]
     
-    Outputs percentage overlap
-    """
-    dx = min(BBox1[2], BBox2[2]) - max(BBox1[0], BBox2[0])
-    dy = min(BBox1[3], BBox2[3]) - max(BBox1[1], BBox2[1])
-    if (dx>=0) and (dy>=0):
-        #Area of ind 1:
-        Area1 = (BBox1[2]-BBox1[0])*(BBox1[3]-BBox1[1])
-        if Area1 == 0:
-            return 0
-        return (dx*dy)/Area1
-    else:
-        return 0
-    
-def IsPointValid(Dim, point):
-    """Check if a point is valid, i.e within image frame"""
-    #get dimension of screen from config
-    Valid = False
-    if 0 <= point[0] <= Dim[0] and 0 <= point[1] <= Dim[1]:
-        Valid = True
-    else:
-        return Valid
-    return Valid
+def VisualizeTracks(frame,TrackingOut):
+    """Visualize SORT tracking output"""
+
+    for x in range(TrackingOut.shape[0]):
+        Point = (round(TrackingOut[x][0]),round(TrackingOut[x][1])-5)
+
+        frame = cv2.putText(frame,"ID: %s" %str(int(TrackingOut[x][4])),Point, cv2.FONT_HERSHEY_COMPLEX_SMALL, 1, [255,0,0],1, cv2.LINE_AA)
+
+    return frame
+
+def Visualize3DTracks(frame,TrackerOut,VisCam):
+    """Visualize 3D tracker tracking output"""
+
+    points3D = np.array(list(TrackerOut.values()))
+    IDs3D = list(TrackerOut.keys())
+    Allimgpts, jac = cv2.projectPoints(points3D, VisCam.rvec, VisCam.tvec, VisCam.camMat, VisCam.distCoef)
 
 
-def MatchID_BBox(GT_BBox,Pred_BBoxList,confidence_threshold=0.5,i=None):
-    """Given ground truth bbox and model predictions, assign ID to prediction based on BBox overlap"""
-    
-    OutDict = {}
-    AssingedIndex = []
-    
-
-    #Just match all ground truth to all
-    for key,val in GT_BBox.items() :
-        FoundMatch = False
-        PercentOverlapList  = [GetBBoxOverlap(Pred_BBox,val) for Pred_BBox in Pred_BBoxList]
+    for j in range(Allimgpts.shape[0]):
         # import ipdb;ipdb.set_trace()
-        if len(PercentOverlapList) ==0 or sum(PercentOverlapList) == 0: #no bbox predicted or no overlap
-            continue
+        
+        Point = (round(Allimgpts[j][0][0])-30,round(Allimgpts[j][0][1])-70)
 
-        while FoundMatch == False:            
-            MaxIndex = np.argmax(PercentOverlapList)
-            if MaxIndex in AssingedIndex:
-                if sum(PercentOverlapList) == 0: ##all possible match changed to 0, no match
-                    break
-                PercentOverlapList[MaxIndex] = 0
-                # print(i) #debugging purposes
-                
-                continue
-                #continue looping if the bbox has low score or is already assinged.
-            else:
-                OutDict.update({key:MaxIndex})
-                AssingedIndex.append(MaxIndex)
-                FoundMatch = True
+        ##Plot rectangle around text
+        x,y = Point
+        text = "ID: %s"%str(int(IDs3D[j]))
+        font = cv2.FONT_HERSHEY_COMPLEX_SMALL
+        text_size, _ = cv2.getTextSize(text, font, 1, 1)
+        text_w, text_h = text_size
+        cv2.rectangle(frame, Point, (x + text_w, y + text_h), [255,255,255], -1)
 
-    return OutDict
+        frame = cv2.putText(frame,text,(x,y+text_h), font, 1, [255,0,0],1, cv2.LINE_AA)
+
+
+    return frame
+
 
 
 def RunYOLOLoop(YOLOModel, DatasetPath,SequenceNum,VisualizeIndex,startFrame,TotalFrames,ScaleBBox):
     """Get YOLO boxes"""
     SequenceObj = Trial.Trial(DatasetPath,SequenceNum)
-    SequenceObj.load3DPopDataset()
-    
-    VisCam = SequenceObj.camObjects[VisualizeIndex]
-    
-    NumInd = len(SequenceObj.Subjects)
+    SequenceObj.load3DPopTrainingSet(Filter = True, Type = "Test")
 
     counter=startFrame
 
-    CamParamDict = {} #dictionary for camera parameters
     CamNames = []
     for cam in SequenceObj.camObjects:
         CamNames.append(cam.CamName)
@@ -241,26 +432,32 @@ def RunYOLOLoop(YOLOModel, DatasetPath,SequenceNum,VisualizeIndex,startFrame,Tot
         cap.set(cv2.CAP_PROP_POS_FRAMES,counter) 
 
         
-    imsize = (int(cap.get(3)),int(cap.get(4)))
     # out = cv2.VideoWriter(filename="YOLODLC3D_sample.mp4", apiPreference=cv2.CAP_FFMPEG, fourcc=cv2.VideoWriter_fourcc(*'mp4v'), fps=30, frameSize = imsize)
 
     OutbboxList = []
+    OutConfList = []
+
+    if TotalFrames == -1:
+        TotalFrames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
 
     for i in tqdm(range(TotalFrames), desc = "Running YOLO:"):
-        FramebboxDict = {} #Points Dictionary for this frame
-
         FrameList = []
         BBoxList = []
+        ConfidenceList = []
         #read frames
         for cap in capList:
             ret, frame = cap.read()
             FrameList.append(frame)
 
+        if ret == False:
+            break
+
         for x in range(len(SequenceObj.camObjects)): #for each cam
             InferFrame = FrameList[x].copy()
             InferFrame = InferFrame
             # InferFrame = torch.tensor(InferFrame).to("cuda")
-            results = YOLOModel(InferFrame, imgsz=3840)
+            results = YOLOModel(InferFrame, imgsz=3840, verbose = False)
             ##Filter for birds:
             classID = [key for key,val in results[0].names.items() if val == "bird"][0]
             # frame = results[0].plot()
@@ -279,7 +476,13 @@ def RunYOLOLoop(YOLOModel, DatasetPath,SequenceNum,VisualizeIndex,startFrame,Tot
             BBoxList.append(bbox)
             # FramebboxDict.update({CamNames[x]:BBoxList})
             
+            ConfList = results[0].boxes.conf.cpu().numpy().tolist()
+            ConfidenceList.append(ConfList)
+
+            # import ipdb;ipdb.set_trace()
+            
         OutbboxList.append(BBoxList)
+        OutConfList.append(ConfidenceList)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
@@ -290,19 +493,36 @@ def RunYOLOLoop(YOLOModel, DatasetPath,SequenceNum,VisualizeIndex,startFrame,Tot
         ret, frame = cap.read()
         FrameList.append(frame)
 
-    return OutbboxList
+    return OutbboxList, OutConfList
+    
+def DLCInference(InferFrame,box,dlc_liveObj,CropSize):
+    """Inference for DLC"""
+    box = [0 if val < 0 else val for val in box] #f out of screen, 0
 
-def RunDLCLoop(dlc_liveObj,OutbboxList,SequenceNum,DatasetPath,CropSize,startFrame,TotalFrames,VisualizeIndex = 0,ScaleBBox=1):
+
+    Crop = InferFrame[round(box[1]):round(box[3]),round(box[0]):round(box[2])]
+
+
+    if dlc_liveObj.sess == None: #if first time, init
+        DLCPredict2D = dlc_liveObj.init_inference(Crop)
+
+    DLCPredict2D= dlc_liveObj.get_pose(Crop)
+
+    # import ipdb;ipdb.set_trace()
+    DLCPredict2DList = [[DLCPredict2D[j,0]+box[0],DLCPredict2D[j,1]+box[1]] for j in range(DLCPredict2D.shape[0])]
+
+    return DLCPredict2DList
+
+def RunDLCLoop(dlc_liveObj,OutbboxList,OutConfList,SequenceNum,DatasetPath,CropSize,startFrame,TotalFrames,VisualizeIndex,ScaleBBox):
+    """Read a sequence from 3D pop then do inference with i-muppet + triangulate"""
     SequenceObj = Trial.Trial(DatasetPath,SequenceNum)
-    SequenceObj.load3DPopDataset()
+    SequenceObj.load3DPopTrainingSet(Filter = True, Type = "Test")
     
     VisCam = SequenceObj.camObjects[VisualizeIndex]
-    
+
+    # TotalFrames = 20
     NumInd = len(SequenceObj.Subjects)
-
-    cv2.namedWindow("Window",cv2.WINDOW_NORMAL)
-    counter=startFrame
-
+    
     CamParamDict = {} #dictionary for camera parameters
     CamNames = []
     for cam in SequenceObj.camObjects:
@@ -316,85 +536,263 @@ def RunDLCLoop(dlc_liveObj,OutbboxList,SequenceNum,DatasetPath,CropSize,startFra
         }})
         CamNames.append(cam.CamName)
 
+
+    cv2.namedWindow("Window", cv2.WINDOW_NORMAL)
+
+    counter = startFrame
+
+    Tracker3DOutDict = {}
+
     ##Setup video capture objects
     capList = []
     for cam in SequenceObj.camObjects:    
         cap = cv2.VideoCapture(cam.VideoPath)
         capList.append(cap)
         
+
+    if TotalFrames == -1:
+        TotalFrames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
     for cap in capList:
         cap.set(cv2.CAP_PROP_POS_FRAMES,counter) 
 
         
     imsize = (int(cap.get(3)),int(cap.get(4)))
-    out = cv2.VideoWriter(filename="YOLODLC3D_sample.mp4", apiPreference=cv2.CAP_FFMPEG, fourcc=cv2.VideoWriter_fourcc(*'mp4v'), fps=30, frameSize = imsize)
+    # out = cv2.VideoWriter(filename="BarnTracking_sample.mp4", apiPreference=cv2.CAP_FFMPEG, fourcc=cv2.VideoWriter_fourcc(*'mp4v'), fps=30, frameSize = imsize)
 
-    for i in tqdm(range(TotalFrames)):
-        PointsDict = {} #Points Dictionary for this frame
+    Points3DDict = {}
+
+    Sort_trackerList = [Sort(max_age = 10) for b in range(len(CamNames))]
+
+    AllMatched = False
+    Rematched = False
+    GlobalMatchedDict = {cam:{} for cam in CamNames} #global matching dictionary
+
+    ### 2D tracking result files
+    Detection2DOutDict = {Cam:{} for Cam in CamNames}
+    Tracking2DOutDict = {Cam:{} for Cam in CamNames}
+    Points2DDict = {}
+    Points3DList = []
+
+    # for i in tqdm(range(TotalFrames)):
+    for i in tqdm(range(len(OutbboxList))):
+
+        PointsDict = {} #Points Dictionary for this frames
 
         FrameList = []
         BBoxList = []
+
         #read frames
         for cap in capList:
             ret, frame = cap.read()
             FrameList.append(frame)
+        
+        if SequenceNum == 59 and i<90:
+            continue
 
-        for x in range(len(SequenceObj.camObjects)): #for each cam
-            InferFrame = FrameList[x].copy()
-            InferFrame = InferFrame
+        if ret == False: #end of vid
+            break
 
-            bbox = OutbboxList[i][x]
-            # BBoxList.append(bbox)
-            # import ipdb;ipdb.set_trace()
 
-            GT_BBox = {}
-            for bird in SequenceObj.Subjects:
-                top, bot = SequenceObj.camObjects[x].GetBBoxData(SequenceObj.camObjects[x].BBox,counter,bird)
-                outList = [top[0],top[1],bot[0],bot[1]]
-                if np.any(np.isnan(outList)):
-                    continue
-                GT_BBox.update({bird:outList})
-                
-            MatchDict = MatchID_BBox(GT_BBox,bbox)
+        # if AllMatched == False:
+        ##if correspondences not yet matched:
+        MatchingDict = {}
+
+        for x in range(len(SequenceObj.camObjects)):
+            Img = FrameList[x].copy()
+            boxesList = OutbboxList[i][x]
+            ScoresList = OutConfList[i][x]
+
+            # MatchDict = MatchID_BBox(GT_BBox,result,confidence_threshold=confidence_threshold)
             CamDict = {}
-            for k,v in MatchDict.items():
-                box = bbox[v]
-                #Corresponding 2D Points based on matching:
-                DLCPredict2D= DLCInference(InferFrame,box,dlc_liveObj,CropSize)
-                CamDict.update({"%s_%s"%(k,PIGEON_KEYPOINT_NAMES[j]):[DLCPredict2D[j,0]+box[0],DLCPredict2D[j,1]+box[1]] for j in range(DLCPredict2D.shape[0])})    
-                
-            PointsDict.update({CamNames[x]: CamDict})
             
+            Key2DPredList = []
+            for box in boxesList:
+                #Corresponding 2D Points based on matching:
+                DLCPredict2D= DLCInference(Img,box,dlc_liveObj,CropSize)
+                Key2DPredList.append(DLCPredict2D)      
 
+            Key2DPred = np.array(Key2DPredList)   
+
+            # import ipdb;ipdb.set_trace()
+            
+            # if AllMatched == False:
+            ##Get top 10 (or N) individuals with highest scores 
+            NumInd = len(SequenceObj.Subjects)
+            Top10Index = sorted(range(len(ScoresList)), key=lambda i: ScoresList[i])[-NumInd:]
+
+            FilteredBBox = [box for k,box in enumerate(boxesList) if k in Top10Index]
+            FilteredKP = [pt for k,pt in enumerate(Key2DPred) if k in Top10Index]
+            
+            MatchingDict[CamNames[x]] = {"BBox":FilteredBBox, "Keypoints" : FilteredKP}
+            BBoxList.append(FilteredBBox)
+
+
+            FilteredScores = [score for k,score in enumerate(ScoresList) if k in Top10Index]
+            ##combine bbox with the score
+
+            CombinedBBoxScores = [box + [score] for box,score in zip(FilteredBBox,FilteredScores)]
+
+            Detection2DOutDict[CamNames[x]][i] = CombinedBBoxScores
+
+        ##Tracking
+        TrackingOutList = []
+        for x in range(len(CamNames)):
+            TrackArray = np.array(BBoxList[x])
+            if len(TrackArray) == 0:
+                Tracking2DOutDict[CamNames[x]][i] = np.nan
+                TrackingOutList.append(np.nan)
+                continue
+            TrackingOut = Sort_trackerList[x].update(TrackArray)
+            MatchingDict[CamNames[x]]["TrackedBBox"] = TrackingOut
+            TrackingOutList.append(TrackingOut)
+            # import ipdb;ipdb.set_trace()
+            Tracking2DOutDict[CamNames[x]][i] = TrackingOut
+
+        if Rematched == False: #first frame or rematching, only one loop
+            # import ipdb;ipdb.set_trace()
+            MatchDict = MatchingAlgorithm(MatchingDict,CamNames,CamParamDict)
+            # import ipdb;ipdb.set_trace()
+            for x, cam in enumerate(CamNames):
+                # import ipdb;ipdb.set_trace()
+
+                for k,v in MatchDict[cam].items():
+                    if v == None:
+                        continue
+                    ###Check if global id is already in global matched dict
+                    CurrentBoxSum = round(np.array(MatchingDict[cam]["BBox"][v]).sum())
+                    CurrentBBoxSumDistance = [abs(sum(TrackingOutList[x][y,:4])-CurrentBoxSum) for y in range(len(TrackingOutList[x]))]
+                    CurrentIndex = CurrentBBoxSumDistance.index(min(CurrentBBoxSumDistance))
+                    CurrentSortIndex = TrackingOutList[x][CurrentIndex,4]
+                    # import ipdb;ipdb.set_trace()
+                    # SortIndex = TrackingOutList[x][v][4]
+                    GlobalMatchedDict[cam].update({k:CurrentSortIndex})
+
+            # import ipdb;ipdb.set_trace()
+            AssingedSum = sum([len(v) for v in GlobalMatchedDict.values()])
+            if AssingedSum == len(CamNames)*NumInd:
+                AllMatched = True
+
+            Rematched = True
+
+        if AllMatched == False: #all matches not found yet
+            # import ipdb;ipdb.set_trace()
+            MatchDict = MatchingAlgorithm(MatchingDict,CamNames,CamParamDict)
+
+            if len(MatchDict) > 0:
+
+                # import ipdb;ipdb.set_trace()
+                for x, cam in enumerate(CamNames):
+                    # import ipdb;ipdb.set_trace()
+
+                    for k,v in MatchDict[cam].items():
+                        if v == None:
+                            continue
+                        ###Check if global id is already in global matched dict
+                        CurrentBoxSum = round(np.array(MatchingDict[cam]["BBox"][v]).sum())
+                        CurrentBBoxSumDistance = [abs(sum(TrackingOutList[x][y,:4])-CurrentBoxSum) for y in range(len(TrackingOutList[x]))]
+                        CurrentIndex = CurrentBBoxSumDistance.index(min(CurrentBBoxSumDistance))
+                        CurrentSortIndex = TrackingOutList[x][CurrentIndex,4]
+                    
+                        if CurrentSortIndex in GlobalMatchedDict[cam].values():
+                            continue
+                        else:
+                            ##find missing global indicies:
+                            MissingGlobal = list(set(range(NumInd)).difference(list(GlobalMatchedDict[cam].keys())))
+                            ##Get global bbox from cam 1:
+                            MatchedLocalIndexList = []
+                            for MissedIndex in MissingGlobal:
+                                MissedSortIndex = GlobalMatchedDict[CamNames[0]][MissedIndex] #for cam 1, which sort index it is
+                                BBoxSum = TrackingOutList[0][TrackingOutList[0][:,4].tolist().index(MissedSortIndex),:4].sum() #get sum of the index from cam 1
+                                ##find local index from cam 1:
+                                BBoxSumDistance = [abs(sum(MatchingDict[CamNames[0]]["BBox"][y])-BBoxSum) for y in range(len(TrackingOutList[x]))]
+                                LocalIndex = BBoxSumDistance.index(min(BBoxSumDistance))
+                                MatchedLocalIndex = [key1 for key1,val1 in MatchDict[CamNames[0]].items() if val1 == LocalIndex][0]
+                                MatchedLocalIndexList.append(MatchedLocalIndex)
+                            # import ipdb;ipdb.set_trace()
+
+                            if k in MatchedLocalIndexList: #found index for this individual in this frame
+                                GlobalIndex = MissingGlobal[MatchedLocalIndexList.index(k)]
+                                GlobalMatchedDict[cam].update({GlobalIndex:CurrentSortIndex})
+
+                            else:
+                                continue
+                        # import ipdb;ipdb.set_trace()
+                        # SortIndex = TrackingOutList[x][v][4]
+
+                # import ipdb;ipdb.set_trace()
+                AssingedSum = sum([len(v) for v in GlobalMatchedDict.values()])
+                if AssingedSum == len(CamNames)*NumInd:
+                    AllMatched = True
+
+        #Get Corresponding 2D Points based on global matching dict:
+        for x, cam in enumerate(CamNames):
+            CamDict = {}
+
+            for key, val in GlobalMatchedDict[cam].items():
+                try:
+                    # import ipdb;ipdb.set_trace()
+                    TrackIndex = TrackingOutList[x][:,4].tolist().index(val)
+                    TrackedBoxesSum = round(TrackingOutList[x][TrackIndex,:4].sum())
+                    RealBBoxSumDistance = [abs(sum(MatchingDict[cam]["BBox"][y])-TrackedBoxesSum) for y in range(len(MatchingDict[cam]["BBox"]))]
+
+                    #attempt to match bbox of tracked and predicted, summed the values and compared diff
+                    RealBBoxIndex = RealBBoxSumDistance.index(min(RealBBoxSumDistance))
+                    # import ipdb;ipdb.set_trace()
+
+                except:
+                    print("skipped a cam")
+                    continue
+                Key2D = MatchingDict[cam]["Keypoints"][RealBBoxIndex]
+        
+                CamDict.update({"%s_%s"%(key,PIGEON_KEYPOINT_NAMES[j]):[Key2D[j,0],Key2D[j,1]] for j in range(Key2D.shape[0])})    
+        
+            PointsDict.update({cam:CamDict})
         # import ipdb;ipdb.set_trace()
-        TriangTool = BundleAdjustmentTool_Triangulation(CamNames,CamParamDict)
+        Points2DDict[i] = PointsDict.copy()
+
+        TriangTool = BundleAdjustmentTool_Triangulation_Filter(CamNames,CamParamDict)
         TriangTool.PrepareInputData(PointsDict)
         Point3DDict = TriangTool.run()
+        Points3DDict[i] = Point3DDict.copy()
+        Points3DList.append(Point3DDict)
+
+        ##Do tracking in 3D:
+        Points3D = {key.split("_")[0]: val for key,val in Point3DDict.items() if "bp_bottomKeel" in key}
+
+        Tracker3DOutDict[i] = Points3D.copy()
+        # import ipdb;ipdb.set_trace()
+
+        ##Visualize
+        frame = FrameList[VisualizeIndex]
+        Boxes = BBoxList[VisualizeIndex]
 
         # import ipdb;ipdb.set_trace()
-        frame = FrameList[VisualizeIndex]
-        Boxes = OutbboxList[i][VisualizeIndex]
-
-        frame = VizualizeAll(frame, counter,VisCam,Boxes,Point3DDict,imsize,SequenceObj.Subjects)
+        SubjectList = [str(n) for n in range((NumInd))]
+        frame = VizualizeAll(frame, counter,VisCam,Boxes,Point3DDict,imsize,SubjectList)
+        # frame = Visualize3DTracks(frame,TrackerOut,VisCam)
 
         cv2.imshow('Window',frame)
-        # import ipdb;ipdb.set_trace()
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
-        out.write(frame)
+        # torch.cuda.empty_cache()
+        # out.write(frame)
         counter += 1
+        # cv2.imwrite(img=frame, filename="Sample3D.jpg")
+        # print(GlobalMatchedDict)
+        
+    # out.release()
 
-    for cap in capList:
-        cap.release()
-    out.release()
-    cv2.destroyAllWindows()
-    
+    return Points3DDict, Tracker3DOutDict, Detection2DOutDict, Tracking2DOutDict,Points3DList, Points2DDict
 
-def RunInference3DPOP(YOLOModel,dlc_liveObj,SequenceNum,DatasetPath,CropSize,startFrame=0,TotalFrames=1800,VisualizeIndex = 0,ScaleBBox=1):
-    OutbboxList = RunYOLOLoop(YOLOModel, DatasetPath,SequenceNum,VisualizeIndex,startFrame,TotalFrames,ScaleBBox)
+
+def RunInference3DPOP(YOLOModel,dlc_liveObj,SequenceNum,DatasetPath,CropSize,startFrame=0,TotalFrames = 1800,VisualizeIndex = 0,ScaleBBox=1):
+    OutbboxList,OutConfList = RunYOLOLoop(YOLOModel, DatasetPath,SequenceNum,VisualizeIndex,startFrame,TotalFrames,ScaleBBox)
     del YOLOModel
     torch.cuda.empty_cache()
-    RunDLCLoop(dlc_liveObj,OutbboxList,SequenceNum,DatasetPath,CropSize,startFrame,TotalFrames,VisualizeIndex,ScaleBBox)
+    Points3DDict,Tracker3DOutDict,Detection2DOutDict, Tracking2DOutDict,Points3DList,Points2DDict = RunDLCLoop(dlc_liveObj,OutbboxList,OutConfList,SequenceNum,DatasetPath,CropSize,startFrame,TotalFrames,VisualizeIndex,ScaleBBox)
+
+    return Points3DDict,Tracker3DOutDict,Detection2DOutDict, Tracking2DOutDict,Points3DList,Points2DDict
 
 
 def ParseArgs():
@@ -434,6 +832,6 @@ if __name__ == "__main__":
 
     dlc_proc = Processor()
     dlc_liveObj = DLCLive(ExportModelPath, processor=dlc_proc)
-    
-    RunInference3DPOP(YOLOModel,dlc_liveObj,SequenceNum,DatasetPath,CropSize,startFrame=0,TotalFrames = 1800,VisualizeIndex = 0,ScaleBBox=1)
+    RunInference3DPOP(YOLOModel,dlc_liveObj,SequenceNum,DatasetPath,CropSize,startFrame=0,TotalFrames = 900,VisualizeIndex = 0,ScaleBBox=1)
+
 

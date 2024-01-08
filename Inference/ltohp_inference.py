@@ -3,7 +3,7 @@
 import sys
 import os
 import cv2
-sys.path.append("../MAAP3D-3DPOP")
+sys.path.append("Repositories/Dataset-3DPOP")
 
 from POP3D_Reader import Trial
 from Utils import MultiPigeon3D_Dataset
@@ -12,13 +12,7 @@ import math
 
 import shutil
 import argparse
-import time
-import json
-from datetime import datetime
-from collections import defaultdict
-from itertools import islice
-import pickle
-import copy
+
 import sys
 sys.path.append("Repositories/learnable-triangulation-pytorch/")
 sys.path.append("./")
@@ -27,12 +21,8 @@ import numpy as np
 import cv2
 
 import torch
-from torch import nn
-from torch import autograd
 import torch.nn.functional as F
-import torch.optim as optim
 from torch.utils.data import DataLoader
-from torch.nn.parallel import DistributedDataParallel
 
 from tensorboardX import SummaryWriter
 
@@ -44,7 +34,8 @@ from mvn.datasets import human36m
 from mvn.datasets import utils as dataset_utils
 from mvn.utils.volumetric import Line3D
 
-from Utils.VolumeNet import VolumetricTriangulationNet #custom network config
+from Utils.VolumeNet import VolumetricTriangulationNet,AlgebraicTriangulationNet #custom network config
+PIGEON_KEYPOINT_NAMES = ['bp_leftShoulder', 'bp_rightShoulder', 'bp_topKeel', 'bp_bottomKeel', 'bp_tail','hd_beak', 'hd_nose','hd_leftEye', 'hd_rightEye']
 
 
 
@@ -76,15 +67,13 @@ def LoadModel(config,device):
 
     return model
 
-
-def loadDataReader(SequenceObj,frame):
+def loadAlgDataReader(SequenceObj,frame, configAlg):
     #No NA subjects:
     BBoxList = [SequenceObj.camObjects[0].GetBBoxData(SequenceObj.camObjects[0].BBox,frame,bird) for bird in SequenceObj.Subjects]
     BBoxIndex = [idx for idx,bbox in enumerate(BBoxList) if not math.isnan(bbox[0][0])]
     
     # import ipdb;ipdb.set_trace()
     dataset = MultiPigeon3D_Dataset.POP3D_Dataset(image_shape=(256, 256),
-                 cuboid_side=config.model.cuboid_side,
                  scale_bbox=1.5,
                  norm_image=True,
                  ignore_cameras=[],
@@ -99,15 +88,48 @@ def loadDataReader(SequenceObj,frame):
     dataloader = DataLoader(
         dataset,
         batch_size=len(BBoxIndex),
-        num_workers=1,
-                    collate_fn=dataset_utils.make_collate_fn(randomize_n_views=config.dataset.train.randomize_n_views,
-                                                     min_n_views=config.dataset.train.min_n_views,
-                                                     max_n_views=config.dataset.train.max_n_views),
+        num_workers=0,
+                    collate_fn=dataset_utils.make_collate_fn(randomize_n_views=configAlg.dataset.train.randomize_n_views,
+                                                     min_n_views=configAlg.dataset.train.min_n_views,
+                                                     max_n_views=configAlg.dataset.train.max_n_views),
         worker_init_fn=dataset_utils.worker_init_fn,
         pin_memory=True
         )
     
     return dataloader
+
+def loadVolDataReader(SequenceObj,frame,configVol,Points3D):
+    #No NA subjects:
+    BBoxList = [SequenceObj.camObjects[0].GetBBoxData(SequenceObj.camObjects[0].BBox,frame,bird) for bird in SequenceObj.Subjects]
+    BBoxIndex = [idx for idx,bbox in enumerate(BBoxList) if not math.isnan(bbox[0][0])]
+    
+    # import ipdb;ipdb.set_trace()
+    dataset = MultiPigeon3D_Dataset.POP3D_Dataset_AlgIn(image_shape=(256, 256),
+                 cuboid_side=configVol.model.cuboid_side,
+                 scale_bbox=1.5,
+                 norm_image=True,
+                 ignore_cameras=[],
+                 crop=True,
+                 Dataset = SequenceObj,
+                 Frame = frame,
+                 BBoxIndex = BBoxIndex,
+                 Points3D= Points3D
+                 )
+    # import ipdb;ipdb.set_trace()
+    # yo = dataset.__getitem__(0)
+    # yo["keypoints_3d"]
+    dataloader = DataLoader(
+        dataset,
+        batch_size=len(BBoxIndex),
+        num_workers=0,
+                    collate_fn=dataset_utils.make_collate_fn(randomize_n_views=configVol.dataset.train.randomize_n_views,
+                                                     min_n_views=configVol.dataset.train.min_n_views,
+                                                     max_n_views=configVol.dataset.train.max_n_views),
+        worker_init_fn=dataset_utils.worker_init_fn,
+        pin_memory=True
+        )
+    
+    return dataloader,BBoxIndex
 
 def ComputeProjectionMatrix(rotationMatrix,translationMatrix,intrinsicMatrix):
     """
@@ -268,43 +290,65 @@ def VisualizeAll(frame, VisCam,keypoints_3d_pred,cuboids_pred,
 
 
 
-def Inference3DPOP(model, SequenceNum,DatasetPath, config,device,VisualizeIndex = 0):
+def Inference3DPOP(Volmodel,Algmodel, SequenceNum,DatasetPath,  configAlg,configVol,device,TotalFrames = 1800,VisualizeIndex = 0):
     """Read a sequence from 3D pop then do inference with ltohp"""
     SequenceObj = Trial.Trial(DatasetPath,SequenceNum)
-    SequenceObj.load3DPopDataset()
+    SequenceObj.load3DPopTrainingSet(Filter = True, Type = "Test")
     
     VisCam = SequenceObj.camObjects[VisualizeIndex]
     
-    TotalFrames = len(VisCam.Keypoint2D.index)
-    # TotalFrames = 1800
+    # TotalFrames = len(VisCam.Keypoint2D.index)
+    # TotalFrames = 250
     NumInd = len(SequenceObj.Subjects)
     
     cv2.namedWindow("Window", cv2.WINDOW_NORMAL)
 
-    counter = 1000
+    counter = 0
     
     cap = cv2.VideoCapture(VisCam.VideoPath)
     cap.set(cv2.CAP_PROP_POS_FRAMES,counter) 
     imsize = (int(cap.get(3)),int(cap.get(4)))
     out = cv2.VideoWriter(filename="ltohp_sample.mp4", apiPreference=cv2.CAP_FFMPEG, fourcc=cv2.VideoWriter_fourcc(*'mp4v'), fps=30, frameSize = imsize)
 
+    Points3DDict = {}
+
     for i in tqdm(range(TotalFrames)):
+
+
         ret, frame = cap.read()
+
+        if ret == False:
+            break
+
         
+        ### First Run Algorithmic
         ##Read data
-        DataLoader = loadDataReader(SequenceObj,counter)
+        DataLoader = loadAlgDataReader(SequenceObj,counter,configAlg)
         
         with torch.inference_mode():
             index, batch = next(enumerate(DataLoader))
         
-            images_batch, keypoints_3d_gt, keypoints_3d_validity_gt, proj_matricies_batch = dataset_utils.prepare_batch(batch, device, config)
-            # import ipdb;ipdb.set_trace()
-            
-            keypoints_3d_pred, heatmaps_pred, volumes_pred, confidences_pred, cuboids_pred, coord_volumes_pred, base_points_pred = model(images_batch, proj_matricies_batch, batch)
-            # import ipdb;ipdb.set_trace()
-            # print(keypoints_3d_pred)
+            images_batch, keypoints_3d_gt, keypoints_3d_validity_gt, proj_matricies_batch = dataset_utils.prepare_batch(batch, device, configAlg)
+            keypoints_3d_pred_Alg,keypoints_2d_pred,heatmap_2d_pred,confidence_pred = Algmodel(images_batch, proj_matricies_batch, batch)
         
+            DataLoader, BBoxIndex = loadVolDataReader(SequenceObj,counter,configVol,keypoints_3d_pred_Alg)
+            index, batch = next(enumerate(DataLoader))
+            images_batch, keypoints_3d_gt, keypoints_3d_validity_gt, proj_matricies_batch = dataset_utils.prepare_batch(batch, device, configVol)
+            keypoints_3d_pred, heatmaps_pred, volumes_pred, confidences_pred, cuboids_pred, coord_volumes_pred, base_points_pred = Volmodel(images_batch, proj_matricies_batch, batch)
+
+            OutDict = {}
+            # import ipdb;ipdb.set_trace()
+            PredKP = keypoints_3d_pred.cpu().numpy()
+            for x in range(len(BBoxIndex)):
+                BirdID = SequenceObj.Subjects[BBoxIndex[x]]
+                BirdDict = {"%s_%s"%(BirdID,kp): PredKP[x,y,:] for y,kp in enumerate(PIGEON_KEYPOINT_NAMES)}
+                OutDict.update(BirdDict)
+            # print(keypoints_3d_pred)
+            # if len(BBoxIndex) < 10:
+            #     import ipdb;ipdb.set_trace()
+
             frame = VisualizeAll(frame, VisCam,keypoints_3d_pred,cuboids_pred,base_points_pred,VisualizeIndex,imsize)
+
 
             # import ipdb;ipdb.set_trace()
             # frame = VisualizeAll(frame, VisCam,keypoints_3d_gt,cuboids_pred,proj_matricies_batch,VisualizeIndex,imsize)
@@ -315,9 +359,13 @@ def Inference3DPOP(model, SequenceNum,DatasetPath, config,device,VisualizeIndex 
                 break
             # torch.cuda.empty_cache()
             out.write(frame)
+            Points3DDict[i] = OutDict
+
         counter += 1
         
     out.release()
+
+    return Points3DDict
 
 
 def ParseArgs():
@@ -331,11 +379,14 @@ def ParseArgs():
                         type=int,
                         required=True,
                         help="Sequence Number of 3D POP")
-    parser.add_argument("--config",
+    parser.add_argument("--configVol",
                         type=str,
-                        default= "Configs/ltohp_pigeonConfig.yaml",
-                        help="Path to ltohp config file")
-
+                        default= "Configs/ltohp_pigeonConfig_inferenceVol.yaml",
+                        help="Path to ltohp config file for volumetric model")
+    parser.add_argument("--configAlg",
+                        type=str,
+                        default= "Configs/ltohp_pigeonConfig_inferenceAlg.yaml",
+                        help="Path to ltohp config file for algebraic model")
     arg = parser.parse_args()
 
     return arg
@@ -345,15 +396,17 @@ if __name__ == "__main__":
 
     DatasetPath = args.dataset
     SequenceNum = args.seq
-    ConfigPath = args.config
-    
-    
-    config = cfg.load_config(ConfigPath)
+    ConfigPathVol = args.configVol
+    ConfigPathAlg = args.configAlg
+
     device = torch.device(0)
 
+    configVol = cfg.load_config(ConfigPathVol)
+    Volmodel = LoadModel(configVol,device)
+    Volmodel.eval()
+
+    configAlg = cfg.load_config(ConfigPathAlg)
+    Algmodel = LoadModel(configAlg,device)
+    Algmodel.eval()
     
-    model = LoadModel(config,device)
-    model.eval()
-    
-    
-    Inference3DPOP(model, SequenceNum,DatasetPath, config,device,VisualizeIndex = 2)
+    Inference3DPOP(Volmodel,Algmodel, SequenceNum,DatasetPath, configAlg,configVol,device,VisualizeIndex = 2)

@@ -1,5 +1,5 @@
 """
-Run YOLO+ DLC, then triangulate for 3D pose estimation
+Run VitPose*, then triangulate for 3D pose estimation
 Inference script, reads in video from 3DPOP then does triangulate then reproject to 1 view
 
 This script:
@@ -7,17 +7,14 @@ with dynamic matching from Huang et al to initialize first frame,
 then 2D sort from each view to track IDs
 
 """
-
-import torchvision
-import torch
-from torchvision import transforms
 import cv2
 import numpy as np
 import os
 import math
+import pickle
 
 import sys
-sys.path.append("./Repositories/Dataset-3DPOP")
+sys.path.append("Repositories/Dataset-3DPOP")
 from POP3D_Reader import Trial
 
 import sys
@@ -25,27 +22,43 @@ sys.path.append("./")
 sys.path.append("Utils")
 import VisualizeUtil
 
-import Network_utils
-from BundleAdjustmentTool import BundleAdjustmentTool_Triangulation,BundleAdjustmentTool_Triangulation_Filter
+from BundleAdjustmentTool import BundleAdjustmentTool_Triangulation, BundleAdjustmentTool_Triangulation_Filter
 from tqdm import tqdm
-import pickle
+import argparse
 
 import itertools
 import HungarianAlgorithm
+
 from scipy.spatial import distance_matrix
 from ultralytics import YOLO
 
-sys.path.append("./Repositories/sort/")
+sys.path.append("Repositories/sort/")
 from sort import *
+
+sys.path.append("Repositories/DeepLabCut/")
 sys.path.append("Repositories/DeepLabCut-live")
+
+
+
+sys.path.append("Repositories/Dataset-3DPOP")
+from POP3D_Reader import Trial
 
 import math
 import os
-import deeplabcut as dlc
-from dlclive import DLCLive, Processor
-PIGEON_KEYPOINT_NAMES = ['bp_leftShoulder', 'bp_rightShoulder', 'bp_topKeel', 'bp_bottomKeel', 'bp_tail','hd_beak', 'hd_leftEye', 'hd_rightEye', 'hd_nose']
 
-import argparse
+
+PIGEON_KEYPOINT_NAMES = ["hd_beak","hd_nose","hd_leftEye","hd_rightEye","bp_leftShoulder","bp_rightShoulder","bp_topKeel","bp_bottomKeel","bp_tail"]
+
+sys.path.append("Repositories/ViTPose")
+
+
+from mmpose.apis import (inference_top_down_pose_model, init_pose_model,
+                         vis_pose_result)
+from mmpose.datasets import DatasetInfo
+
+import warnings
+
+
 
 def GetEucDist(Point1,Point2):
     """Get euclidian error, both 2D and 3D"""
@@ -59,27 +72,6 @@ def GetEucDist(Point1,Point2):
         Exception("point input size error")
     
     return EucDist
-
-def LoadNetwork(WeightsPath,device):
-
-    network = Network_utils.load_network(network_name='KeypointRCNN', 
-                           looking_for_object='pigeon', 
-                           eval_mode=True, pre_trained_model=WeightsPath,
-                            device=device)
-    
-    return network
-
-def ProcessImage(frame,device):
-    frame = Network_utils.image_cv_to_rgb_tensor(frame)
-
-    frame = Network_utils.normalize_tensor_image(
-        tensor_image=frame,
-        mean=(0.5, 0.5, 0.5),
-        std=(0.5, 0.5, 0.5)
-    )
-    frame = Network_utils.image_to_device(image=frame, device=device)
-    
-    return frame
 
 def GetBBoxOverlap(BBox1,BBox2):
     """
@@ -365,6 +357,9 @@ def VizualizeAll(frame, counter,VisCam,Boxes,Point3DDict,imsize,SubjectList, Lin
         # import ipdb;ipdb.set_trace()
         
         Point = (round(Allimgpts[j][0][0])-30,round(Allimgpts[j][0][1])-70)
+        if not IsPointValid(imsize, Point):
+            continue
+
 
         ##Plot rectangle around text
         x,y = Point
@@ -422,7 +417,7 @@ def RunYOLOLoop(YOLOModel, DatasetPath,SequenceNum,VisualizeIndex,startFrame,Tot
     """Get YOLO boxes"""
     SequenceObj = Trial.Trial(DatasetPath,SequenceNum)
     SequenceObj.load3DPopTrainingSet(Filter = True, Type = "Test")
-    
+
     counter=startFrame
 
     CamNames = []
@@ -520,9 +515,32 @@ def DLCInference(InferFrame,box,dlc_liveObj,CropSize):
 
     return DLCPredict2DList
 
-def RunDLCLoop(dlc_liveObj,OutbboxList,OutConfList,SequenceNum,DatasetPath,CropSize,startFrame,TotalFrames,VisualizeIndex,ScaleBBox):
+
+
+def VitPoseInference(results,img,pose_model,dataset,dataset_info):
+    # test a single image, with a list of bboxes.
+    output_layer_names = None
+
+
+    pose_results, returned_outputs = inference_top_down_pose_model(
+        pose_model,
+        img,
+        results,
+        format='xyxy',
+        dataset=dataset,
+        dataset_info=dataset_info,
+        return_heatmap=False,
+        outputs=output_layer_names)
+    
+
+    return pose_results
+
+
+
+def RunInference(pose_model,dataset,dataset_info,SequenceNum,DatasetPath,CropSize,startFrame,TotalFrames,VisualizeIndex,ScaleBBox):
     """Read a sequence from 3D pop then do inference with i-muppet + triangulate"""
     SequenceObj = Trial.Trial(DatasetPath,SequenceNum)
+    
     SequenceObj.load3DPopTrainingSet(Filter = True, Type = "Test")
     
     VisCam = SequenceObj.camObjects[VisualizeIndex]
@@ -578,22 +596,26 @@ def RunDLCLoop(dlc_liveObj,OutbboxList,OutConfList,SequenceNum,DatasetPath,CropS
     ### 2D tracking result files
     Detection2DOutDict = {Cam:{} for Cam in CamNames}
     Tracking2DOutDict = {Cam:{} for Cam in CamNames}
+    Points2DDict = {}
 
     Points3DList = []
 
-    # for i in tqdm(range(TotalFrames)):
-    for i in tqdm(range(len(OutbboxList))):
+    for i in tqdm(range(TotalFrames)):
+    # for i in tqdm(range(len(OutbboxList))):
 
         PointsDict = {} #Points Dictionary for this frames
 
         FrameList = []
         BBoxList = []
+        ConfidenceList = []
 
         #read frames
         for cap in capList:
             ret, frame = cap.read()
             FrameList.append(frame)
         
+        if SequenceNum == 59 and i<90:
+            continue
         if ret == False: #end of vid
             break
 
@@ -604,17 +626,45 @@ def RunDLCLoop(dlc_liveObj,OutbboxList,OutConfList,SequenceNum,DatasetPath,CropS
 
         for x in range(len(SequenceObj.camObjects)):
             Img = FrameList[x].copy()
-            boxesList = OutbboxList[i][x]
-            ScoresList = OutConfList[i][x]
+
+            ####Run YOLO First
+            results = YOLOModel(Img, imgsz=3840, verbose=False)
+            ##Filter for birds:
+            classID = [key for key,val in results[0].names.items() if val == "bird"][0]
+            # frame = results[0].plot()
+            DetectedClasses = results[0].boxes.cls.cpu().numpy().tolist()
+
+            
+            # bbox = results[0].boxes.xyxy.cpu().numpy().tolist()
+            bbox = results[0].boxes.xywh.cpu().numpy().tolist()
+            ##Filter birds only:
+            bbox = [box for x,box in enumerate(bbox) if DetectedClasses[x] == classID]
+
+
+            bbox = [[box[0],box[1],box[2]*ScaleBBox,box[3]*ScaleBBox] for box in bbox] #scale width and height
+            ##convert back to xyxy:
+            bbox = [[box[0]-(box[2]/2), box[1]-(box[3]/2),box[0]+(box[2]/2),box[1]+(box[3]/2)] for box in bbox]
+            # BBoxList.append(bbox)
+            # FramebboxDict.update({CamNames[x]:BBoxList})
+            
+            ConfList = results[0].boxes.conf.cpu().numpy().tolist()
+            ConfidenceList.append(ConfList)
+
+            ####Run KP detector
+            boxesList = bbox
+            ScoresList = ConfList
 
             # MatchDict = MatchID_BBox(GT_BBox,result,confidence_threshold=confidence_threshold)
             CamDict = {}
-            
+            results = [{'bbox': box} for box in boxesList]
+            pose_results = VitPoseInference(results, Img, pose_model, dataset,dataset_info)
+
+
             Key2DPredList = []
-            for box in boxesList:
+            for b,box in enumerate(boxesList):
                 #Corresponding 2D Points based on matching:
-                DLCPredict2D= DLCInference(Img,box,dlc_liveObj,CropSize)
-                Key2DPredList.append(DLCPredict2D)      
+                # DLCPredict2D= DLCInference(Img,box,dlc_liveObj,CropSize)
+                Key2DPredList.append(pose_results[b]["keypoints"])      
 
             Key2DPred = np.array(Key2DPredList)   
 
@@ -643,6 +693,12 @@ def RunDLCLoop(dlc_liveObj,OutbboxList,OutConfList,SequenceNum,DatasetPath,CropS
         TrackingOutList = []
         for x in range(len(CamNames)):
             TrackArray = np.array(BBoxList[x])
+
+            if len(TrackArray) == 0:
+                Tracking2DOutDict[CamNames[x]][i] = np.nan
+                TrackingOutList.append(np.nan)
+                continue
+
             TrackingOut = Sort_trackerList[x].update(TrackArray)
             MatchingDict[CamNames[x]]["TrackedBBox"] = TrackingOut
             TrackingOutList.append(TrackingOut)
@@ -749,7 +805,7 @@ def RunDLCLoop(dlc_liveObj,OutbboxList,OutConfList,SequenceNum,DatasetPath,CropS
         
             PointsDict.update({cam:CamDict})
         # import ipdb;ipdb.set_trace()
-            
+        Points2DDict[i] = PointsDict.copy()
         TriangTool = BundleAdjustmentTool_Triangulation_Filter(CamNames,CamParamDict)
         TriangTool.PrepareInputData(PointsDict)
         Point3DDict = TriangTool.run()
@@ -778,20 +834,13 @@ def RunDLCLoop(dlc_liveObj,OutbboxList,OutConfList,SequenceNum,DatasetPath,CropS
         # out.write(frame)
         counter += 1
         # cv2.imwrite(img=frame, filename="Sample3D.jpg")
-        print(GlobalMatchedDict)
-        
+        # print(GlobalMatchedDict)
+        # import ipdb;ipdb.set_trace()
     # out.release()
 
-    return Points3DDict, Tracker3DOutDict, Detection2DOutDict, Tracking2DOutDict,Points3DList
+    return Points3DDict, Tracker3DOutDict, Detection2DOutDict, Tracking2DOutDict,Points3DList, Points2DDict
 
 
-def RunInference3DPOP(YOLOModel,dlc_liveObj,SequenceNum,DatasetPath,CropSize,startFrame=0,TotalFrames = 1800,VisualizeIndex = 0,ScaleBBox=1):
-    OutbboxList,OutConfList = RunYOLOLoop(YOLOModel, DatasetPath,SequenceNum,VisualizeIndex,startFrame,TotalFrames,ScaleBBox)
-    del YOLOModel
-    torch.cuda.empty_cache()
-    Points3DDict,Tracker3DOutDict,Detection2DOutDict, Tracking2DOutDict,Points3DList = RunDLCLoop(dlc_liveObj,OutbboxList,OutConfList,SequenceNum,DatasetPath,CropSize,startFrame,TotalFrames,VisualizeIndex,ScaleBBox)
-
-    return Points3DDict,Tracker3DOutDict,Detection2DOutDict, Tracking2DOutDict,Points3DList
 
 def ParseArgs():
     parser = argparse.ArgumentParser()
@@ -804,18 +853,22 @@ def ParseArgs():
                         type=int,
                         required=True,
                         help="Sequence Number of 3D POP")
+    parser.add_argument("--OutDir",
+                        type=str,
+                        required=True,
+                        help="Output directory for pickle files")
     parser.add_argument("--YOLOweight",
                         type=str,
                         default= "Weights/YOLO_Barn.pt",
                         help="Path to pre-trained weight for YOLO model")
-    parser.add_argument("--DLCweight",
+    parser.add_argument("--VitPoseConfig",
                         type=str,
-                        default= "Weights/DLC_Barn/",
-                        help="Path to pre-trained weight for exported DLC model directory")
-    parser.add_argument("--OutDir",
+                        default= "Configs/ViTPose_huge_3dpop_256x192.py",
+                        help="Path to VitPose model config")
+    parser.add_argument("--VitPoseCheckpoint",
                         type=str,
-                        default= "./",
-                        help="Output Directory to store results")
+                        default= "Weights/VitPose_3DPOP.pth",
+                        help="VitPose Checkpoint")
 
     arg = parser.parse_args()
 
@@ -828,14 +881,30 @@ if __name__ == "__main__":
     YOLOPath = args.YOLOweight
     DatasetPath = args.dataset
     SequenceNum = args.seq
-    ExportModelPath = args.DLCweight
+    VitConfig = args.VitPoseConfig
+    Checkpoint = args.VitPoseCheckpoint
 
     CropSize = (320,320)
+
     YOLOModel = YOLO(YOLOPath)
 
-    dlc_proc = Processor()
-    dlc_liveObj = DLCLive(ExportModelPath, processor=dlc_proc)
-    Points3DDict,Tracker3DOutDict,Detection2DOutDict, Tracking2DOutDict,Points3DList = RunInference3DPOP(YOLOModel,dlc_liveObj,SequenceNum,DatasetPath,CropSize,startFrame=0,TotalFrames = 3000,VisualizeIndex = 0,ScaleBBox=1)
+    ##VitPose 
+    pose_model = init_pose_model(
+    VitConfig,Checkpoint, device="cuda:0")
+
+    dataset = pose_model.cfg.data['test']['type']
+    dataset_info = pose_model.cfg.data['test'].get('dataset_info', None)
+    if dataset_info is None:
+        warnings.warn(
+            'Please set `dataset_info` in the config.'
+            'Check https://github.com/open-mmlab/mmpose/pull/663 for details.',
+            DeprecationWarning)
+    else:
+        dataset_info = DatasetInfo(dataset_info)
+
+    Points3DDict,Tracker3DOutDict,Detection2DOutDict, Tracking2DOutDict,Points3DList,Points2DDict = RunInference(pose_model,dataset,dataset_info,SequenceNum,DatasetPath,CropSize,
+                                                                                                    startFrame=0,TotalFrames= -1,VisualizeIndex=0,ScaleBBox=1)
+
 
     OutDir = args.OutDir
     pickle.dump(Points3DDict,open(os.path.join(OutDir,"./Dynamic_Point3D_Seq%s.p"%SequenceNum), "wb"))
