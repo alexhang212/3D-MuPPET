@@ -112,7 +112,7 @@ refer to the [training documentation](./Training/readme.md).
 
 Scripts for tracking and evaluation on the test videos of the 3D POP
 dataset are available. The scripts perform inference using the VitPose\*
-pipeline and then format the output to do benchmarking [here](https://github.com/JonathonLuiten/TrackEval/blob/master/docs/MOTChallenge-Official/Readme.md).
+pipeline and then format the output to do benchmarking in [2D](https://github.com/JonathonLuiten/TrackEval/blob/master/docs/MOTChallenge-Official/Readme.md) and [3D](https://github.com/urs-waldmann/MOTChallengeEvalKit/blob/master/ZF3D/README.md) .
 
 ```bash
 ##Run evaluation:
