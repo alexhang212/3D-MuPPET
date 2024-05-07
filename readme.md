@@ -3,13 +3,14 @@
 
 # 3D-MuPPET: 3D Multi-Pigeon Pose Estimation and Tracking
 ## News:
+- **07/05/2024** Paper published in IJCV! [Here](https://link.springer.com/article/10.1007/s11263-024-02074-y) is the article
 - **03/01/2024:** Preprint updated, code updated, datasets and weights uploaded!
 - **18/10/2023:** Officially launched git repository. Please hang on for the datasets and weights
 
 
 ## Description
-This repository contains the code for the preprint: ["3D-MuPPET: 3D Multi-Pigeon Pose
-Estimation and Tracking"](https://arxiv.org/abs/2308.15316). For more details and qualitative results,
+This repository contains the code for the paper: ["3D-MuPPET: 3D Multi-Pigeon Pose
+Estimation and Tracking"](https://link.springer.com/article/10.1007/s11263-024-02074-y). For more details and qualitative results,
 please visit our [project page](https://alexhang212.github.io/3D-MuPPET/). We offer code and scripts for: 1)
 Inference 2) Tracking Evaluation 3) Model Training on the 3DPOP dataset.
 
@@ -128,10 +129,16 @@ For any questions regarding the code, please contact Alex Chan: hoi-hang.chan [a
 
 ## Cite Us
 ```
-@article{waldmann20233d,
-    title={3D-MuPPET: 3D Multi-Pigeon Pose Estimation and Tracking},
-    author={Waldmann, Urs and Chan, Alex Hoi Hang and Naik, Hemal and Nagy, M{\'a}t{\'e} and Couzin, Iain D and Deussen, Oliver and Goldluecke, Bastian and Kano, Fumihiro},
-    journal={arXiv preprint arXiv:2308.15316},
-    year={2023}
-}                           
+
+@article{waldmann20243d,
+	title = {{3D}-{MuPPET}: {3D} {Multi}-{Pigeon} {Pose} {Estimation} and {Tracking}},
+	issn = {1573-1405},
+	url = {https://doi.org/10.1007/s11263-024-02074-y},
+	doi = {10.1007/s11263-024-02074-y},
+	journal = {International Journal of Computer Vision},
+	author = {Waldmann, Urs and Chan, Alex Hoi Hang and Naik, Hemal and Nagy, Máté and Couzin, Iain D. and Deussen, Oliver and Goldluecke, Bastian and Kano, Fumihiro},
+	month = may,
+	year = {2024},
+}
+                         
 ```
