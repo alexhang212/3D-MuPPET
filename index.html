@@ -22,6 +22,9 @@
                             3D Multi-Pigeon Pose Estimation and Tracking
                         </small>
                         <br>
+                        <small class="h4">
+                            <a href="https://link.springer.com/article/10.1007/s11263-024-02074-y" target="_blank">International Journal of Computer Vision, 2024</a>
+                        </small>
                     </h1>
                 </div>
                 <hr style="margin-top:0px">
@@ -139,14 +142,22 @@
                     <h3 class="col-md-12 text-center">
                         <b>News</b>
                     </h3>
-                    <div class="row">
-                        <div class="col-md-12 text-left">
-                        <b>2024/01/03</b> Preprint updated, code updated, datasets and weights uploaded! [<a href="https://doi.org/10.17617/3.HPBBC7" target="_blank">Image Dataset</a>], [<a href="https://doi.org/10.17617/3.ENDMTI" target="_blank">Wild-MuPPET Dataset</a>],[<a href="https://doi.org/10.5281/zenodo.10453890" target="_blank">Weights</a>]
-
-                    <div class="row">
+                <div class="row">
                     <div class="col-md-12 text-left">
-                    <b>2023/10/13</b> We have officially launched our project site, and launched our hugging face demo for 2D posture estimation of pigeons in any environments [<a href="https://huggingface.co/spaces/alexhang/PigeonEverywhere" target="_blank">Hungging Face</a>].
+                    <b>2024/03/28</b> Paper accepted at the International Journal of Computer Vision. [<a href="https://link.springer.com/article/10.1007/s11263-024-02074-y" target="_blank">paper</a>]
                     </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-12 text-left">
+                    <b>2024/01/03</b> Preprint updated, code updated, datasets and weights uploaded! [<a href="https://doi.org/10.17617/3.HPBBC7" target="_blank">Image Dataset</a>, <a href="https://doi.org/10.17617/3.ENDMTI" target="_blank">Wild-MuPPET Dataset</a>, <a href="https://doi.org/10.5281/zenodo.10453890" target="_blank">Weights</a>]
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-12 text-left">
+                    <b>2023/10/13</b> We have officially launched our project site, and launched our hugging face demo for 2D posture estimation of pigeons in any environments. [<a href="https://huggingface.co/spaces/alexhang/PigeonEverywhere" target="_blank">Hungging Face</a>]
+                    </div>
+                </div>
+            </div>
         </section>
         <!-- abstract -->
         <section>
@@ -165,7 +176,7 @@
                 <br>
                 <div class="row">
                     <div class="col-md-12 text-left">
-                    Markerless methods for animal posture tracking have been developing recently, but frameworks and benchmarks for tracking large animal groups in 3D are still lacking. To overcome this gap in the literature, we present 3D-MuPPET, a framework to estimate and track 3D poses of up to 10 pigeons at interactive speed using multiple-views. We train a pose estimator to infer 2D keypoints and bounding boxes of multiple pigeons, then triangulate the keypoints to 3D. For correspondence matching, we first dynamically match 2D detections to global identities in the first frame, then use a 2D tracker to maintain correspondences accross views in subsequent frames. We achieve comparable accuracy to a state of the art 3D pose estimator for Root Mean Square Error (RMSE) and Percentage of Correct Keypoints (PCK). We also showcase a novel use case where our model trained with data of single pigeons provides comparable results on data containing multiple pigeons. This can simplify the domain shift to new species because annotating single animal data is less labour intensive than multi-animal data. Additionally, we benchmark the inference speed of 3D-MuPPET, with up to 10 fps in 2D and 1.5 fps in 3D, and perform quantitative tracking evaluation, which yields encouraging results. Finally, we show that 3D-MuPPET also works in natural environments without model fine-tuning on additional annotations. To the best of our knowledge we are the first to present a framework for 2D/3D posture and trajectory tracking that works in both indoor and outdoor environments.                    </div>
+                    Markerless methods for animal posture tracking have been rapidly developing recently, but frameworks and benchmarks for tracking large animal groups in 3D are still lacking. To overcome this gap in the literature, we present 3D-MuPPET, a framework to estimate and track 3D poses of up to 10 pigeons at interactive speed using multiple camera views. We train a pose estimator to infer 2D keypoints and bounding boxes of multiple pigeons, then triangulate the keypoints to 3D. For identity matching of individuals in all views, we first dynamically match 2D detections to global identities in the first frame, then use a 2D tracker to maintain IDs across views in subsequent frames. We achieve comparable accuracy to a state of the art 3D pose estimator in terms of median error and Percentage of Correct Keypoints. Additionally, we benchmark the inference speed of 3D-MuPPET, with up to 9.45 fps in 2D and 1.89 fps in 3D, and perform quantitative tracking evaluation, which yields encouraging results. Finally, we showcase two novel applications for 3D-MuPPET. First, we train a model with data of single pigeons and achieve comparable results in 2D and 3D posture estimation for up to 5 pigeons. Second, we show that 3D-MuPPET also works in outdoors without additional annotations from natural environments. Both use cases simplify the domain shift to new species and environments, largely reducing annotation effort needed for 3D posture tracking. To the best of our knowledge we are the first to present a framework for 2D/3D animal posture and trajectory tracking that works in both indoor and outdoor environments for up to 10 individuals. We hope that the framework can open up new opportunities in studying animal collective behaviour and encourages further developments in 3D multi animal posture tracking.                    </div>
                 </div>
             </div>
         </section>
