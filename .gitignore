@@ -142,4 +142,5 @@ backupscripts/
 Weights/
 gh-pages/
 TrainingData/*
-
+Data/
+*.csv

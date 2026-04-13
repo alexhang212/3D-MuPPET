@@ -3,6 +3,7 @@
 
 # 3D-MuPPET: 3D Multi-Pigeon Pose Estimation and Tracking
 ## News:
+- **13/04/2026** Updated scripts to reproduce evaluation, as well as adding an additional application specific metric by computing head rotation. See [this preprint](https://arxiv.org/abs/2505.02825) for more details
 - **07/05/2024** Paper published in IJCV! [Here](https://link.springer.com/article/10.1007/s11263-024-02074-y) is the article
 - **03/01/2024:** Preprint updated, code updated, datasets and weights uploaded!
 - **18/10/2023:** Officially launched git repository. Please hang on for the datasets and weights
@@ -37,14 +38,14 @@ All new datasets used in the paper can be found here:
 - Sampled images from 3DPOP for multi and single pigeon can be downloaded within the 3D-POP repository [here](https://doi.org/10.17617/3.HPBBC7)
 - Wild-MuPPET dataset can be found [here](https://doi.org/10.17617/3.ENDMTI)
 
-All weights used for evaluation in the paper can be downloaded [here](https://doi.org/10.5281/zenodo.10453890)
+All weights used for evaluation in the paper can be downloaded [here](https://doi.org/10.5281/zenodo.19551658)
 
 
 ## Inference on 3DPOP
 
 To perform inference and evaluation on the 3D-POP dataset: 1. Download
 the [3D-POP dataset](https://github.com/alexhang212/Dataset-3DPOP). 2.
-Download the pretrained weights from [this link](https://doi.org/10.5281/zenodo.10453890) and
+Download the pretrained weights from [this link](https://doi.org/10.5281/zenodo.19551658) and
 place them in the `/Weights` directory.
 
 ### Setting up the Environment
@@ -109,6 +110,10 @@ python Inference/PigeonWild_2DInference.py --input [input_video] --DLCweight [pa
 Scripts for training are provided. For detailed instructions, please
 refer to the [training documentation](./Training/readme.md).
 
+## Evaluation
+Scripts for extracting evaluation metrics to reproduce results in the manuscript. Refer to [evaluatoin readme]("Evaluation/readme.md") for details. In addition to evaluation presented in the original manuscript, we also provide a new metric (head rotation error), for application specific benchmarking.
+
+
 ## Tracking Evaluation
 
 Scripts for tracking and evaluation on the test videos of the 3D POP
@@ -123,6 +128,7 @@ python Tracking/TrackingInference.py --dataset [3dpop_path] --seq [3dpop_sequenc
 python Tracking/PrepareTrackingBenchmark.py --dataset [3dpop_path] --seq [3dpop_sequence] --input [directory_of_tracking_output] --output [directory_for_benchmark_files]
 
 ```
+
 
 ## Contact
 For any questions regarding the code, please contact Alex Chan: hoi-hang.chan [at] uni-konstanz.de
